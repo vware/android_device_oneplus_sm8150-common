@@ -1,0 +1,24 @@
+/*
+ * Copyright (C) 2024 The LineageOS Project
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+aidl_interface {
+    name: "vendor.lineage.screencapture",
+    vendor_available: true,
+    srcs: ["vendor/lineage/screencapture/*.aidl"],
+    stability: "vintf",
+    owner: "lineage",
+    backend: {
+        cpp: {
+            enabled: false,
+        },
+    },
+    versions_with_info: [
+        {
+            version: "1",
+            imports: [],
+        },
+    ],
+}

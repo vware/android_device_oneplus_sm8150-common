@@ -1,0 +1,6 @@
+service vendor.lineage.screencapture-service /system_ext/bin/hw/vendor.lineage.screencapture-service
+    class hal
+    user system
+    group system
+    task_profiles ServiceCapacityLow
+    interface aidl vendor.lineage.screencapture.IScreenCapture/default

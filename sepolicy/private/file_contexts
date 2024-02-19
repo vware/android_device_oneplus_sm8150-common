@@ -1,2 +1,2 @@
 # Sensors
-/(system_ext|system/system_ext)/bin/als_correction_service    u:object_r:als_correction_service_exec:s0
+/(system_ext|system/system_ext)/bin/hw/vendor\.lineage\.screencapture-service    u:object_r:hal_lineage_screencapture_aidl_exec:s0
