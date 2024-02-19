@@ -1,0 +1,2 @@
+# Sensors
+vendor.lineage.screencapture.IScreenCapture/default    u:object_r:hal_lineage_screencapture_service:s0

@@ -16,6 +16,10 @@
 
 #pragma once
 
+#include <aidl/vendor/lineage/screencapture/BnScreenCapture.h>
+
+using aidl::vendor::lineage::screencapture::IScreenCapture;
+
 namespace android {
 namespace hardware {
 namespace sensors {
@@ -28,6 +32,9 @@ class AlsCorrection {
   public:
     static void init();
     static void correct(float& light);
+
+  private:
+    static std::shared_ptr<IScreenCapture> getCaptureService();
 };
 
 }  // namespace implementation
