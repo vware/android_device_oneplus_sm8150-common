@@ -7,6 +7,7 @@
 #pragma once
 
 #include <aidl/vendor/lineage/oplus_als/BnAreaCapture.h>
+#include <android/hardware/sensors/2.1/types.h>
 
 using aidl::vendor::lineage::oplus_als::IAreaCapture;
 
@@ -21,7 +22,7 @@ static constexpr int SENSOR_TYPE_QTI_WISE_LIGHT = 33171103;
 class AlsCorrection {
   public:
     static void init();
-    static void correct(float& light);
+    static void process(Event& event);
 
   private:
     static std::shared_ptr<IAreaCapture> getCaptureService();
