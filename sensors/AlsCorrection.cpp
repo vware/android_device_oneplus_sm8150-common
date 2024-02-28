@@ -25,6 +25,7 @@ using aidl::vendor::lineage::oplus_als::AreaRgbCaptureResult;
 using android::base::GetProperty;
 
 #define PERSIST_ENG "/mnt/vendor/persist/engineermode/"
+#define PROC_ALS "/proc/sensor/als_cali/"
 #define SYSFS_BACKLIGHT "/sys/class/backlight/panel0-backlight/"
 
 namespace android {
@@ -34,10 +35,10 @@ namespace V2_1 {
 namespace implementation {
 
 static const std::string rgbw_max_lux_paths[4] = {
-    PERSIST_ENG "red_max_lux",
-    PERSIST_ENG "green_max_lux",
-    PERSIST_ENG "blue_max_lux",
-    PERSIST_ENG "white_max_lux",
+    PROC_ALS "red_max_lux",
+    PROC_ALS "green_max_lux",
+    PROC_ALS "blue_max_lux",
+    PROC_ALS "white_max_lux",
 };
 
 struct als_config {
@@ -104,6 +105,8 @@ void AlsCorrection::init() {
 
     std::istringstream is;
     conf.hbr = android::base::GetBoolProperty("vendor.sensors.als_correction.hbr", false);
+    is = std::istringstream(GetProperty("vendor.sensors.als_correction.bias", ""));
+    is >> conf.bias;
     is = std::istringstream(GetProperty("vendor.sensors.als_correction.rgbw_max_lux", ""));
     is >> conf.rgbw_max_lux[0] >> conf.rgbw_max_lux[1]
         >> conf.rgbw_max_lux[2] >> conf.rgbw_max_lux[3];
@@ -128,19 +131,12 @@ void AlsCorrection::init() {
     is >> conf.sensor_inverse_gain[0] >> conf.sensor_inverse_gain[1]
         >> conf.sensor_inverse_gain[2] >> conf.sensor_inverse_gain[3];
 
-    // TODO: Constantly update and persist this
-    float screen_on_time = get(PERSIST_ENG "screenontimebyhours", 0.0);
-    float screen_aging_factor = 1.0 - screen_on_time / 87600.0;
-    ALOGI("Screen on time: %.2fh (aging factor: %.2f%%)",
-        screen_on_time, screen_aging_factor * 100.0);
-
     float rgbw_acc = 0.0;
     for (int i = 0; i < 4; i++) {
         float max_lux = get(rgbw_max_lux_paths[i], 0.0);
         if (max_lux != 0.0) {
             conf.rgbw_max_lux[i] = max_lux;
         }
-        conf.rgbw_max_lux[i] *= screen_aging_factor;
         if (i < 3) {
             rgbw_acc += conf.rgbw_max_lux[i];
             conf.rgbw_lux_postmul[i] = conf.rgbw_max_lux[i] / conf.rgbw_max_lux_div[i];
@@ -153,19 +149,15 @@ void AlsCorrection::init() {
         conf.rgbw_max_lux[0], conf.rgbw_max_lux[1],
         conf.rgbw_max_lux[2], conf.rgbw_max_lux[3]);
 
-    float row_coe = get(PERSIST_ENG "row_coe", 0.0);
+    float row_coe = get(PROC_ALS "row_coe", 0.0);
     if (row_coe != 0.0) {
         conf.sensor_inverse_gain[0] = row_coe / 1000.0;
     }
     conf.agc_threshold = 800.0 / conf.sensor_inverse_gain[0];
 
-    float cali_coe = get(PERSIST_ENG "cali_coe", 0.0);
+    float cali_coe = get(PROC_ALS "cali_coe", 0.0);
     conf.calib_gain = cali_coe > 0.0 ? cali_coe / 1000.0 : 1.0;
     ALOGI("Calibrated sensor gain: %.2fx", 1.0 / (conf.calib_gain * conf.sensor_inverse_gain[0]));
-
-    float als_bias = get(PERSIST_ENG "als_bias", 0.0);
-    conf.bias = als_bias <= 4.0 ? als_bias : 0.0;
-    ALOGI("Sensor bias: %.2f", conf.bias);
 
     float max_brightness = get(SYSFS_BACKLIGHT "max_brightness", 0.0);
     conf.max_brightness = max_brightness > 0.0 ? max_brightness : 1023.0;
@@ -221,13 +213,6 @@ void AlsCorrection::process(Event& event) {
         event.u.scalar -= conf.bias;
     }
 
-    if (conf.hbr && event.u.data[8] != 2.0) {
-        state.force_update = true;
-        event.u.scalar *= conf.calib_gain * conf.sensor_inverse_gain[0];
-        ALOGI("Skipping correction, calibrated ambient light: %.0f lux", event.u.scalar);
-        return;
-    }
-
     nsecs_t now = systemTime(SYSTEM_TIME_BOOTTIME);
     float brightness = get(SYSFS_BACKLIGHT "brightness", 0.0);
 
@@ -252,8 +237,7 @@ void AlsCorrection::process(Event& event) {
     float sensor_raw_calibrated = event.u.scalar * conf.calib_gain * state.last_agc_gain;
     if (state.force_update
             || ((event.u.scalar < state.hyst_min || event.u.scalar > state.hyst_max)
-                && (event.u.data[6] > 2.0
-                    || sensor_raw_calibrated < 10.0 || sensor_raw_calibrated > (5.0 / .07)))) {
+                && (sensor_raw_calibrated < 10.0 || sensor_raw_calibrated > (5.0 / .07)))) {
 
         AreaRgbCaptureResult screenshot = {.r = 0.0f, .g = 0.0f, .b = 0.0f};
         if (service == nullptr || !service->getAreaBrightness(&screenshot).isOk()) {
@@ -262,7 +246,7 @@ void AlsCorrection::process(Event& event) {
         ALOGI("Screen color above sensor: %f %f %f", screenshot.r, screenshot.g, screenshot.b);
 
         float rgbw[4] = {
-            static_cast<float>(screenshot.r), static_cast<float>(screenshot.g), static_cast<float>(screenshot.b),
+            screenshot.r, screenshot.g, screenshot.b,
             screenshot.r * conf.grayscale_weights[0]
                 + screenshot.g * conf.grayscale_weights[1]
                 + screenshot.b * conf.grayscale_weights[2]
@@ -293,7 +277,7 @@ void AlsCorrection::process(Event& event) {
         float agc_gain = conf.sensor_inverse_gain[0];
         if (sensor_raw_corrected > conf.agc_threshold) {
             if (!conf.hbr) {
-                float gain_estimate = sensor_raw_corrected / event.u.data[8];
+                float gain_estimate = sensor_raw_corrected / event.u.data[2];
                 if (gain_estimate > 85.0) {
                     agc_gain = conf.sensor_inverse_gain[0];
                 } else if (gain_estimate >= 39.0) {
@@ -304,7 +288,7 @@ void AlsCorrection::process(Event& event) {
                     agc_gain = conf.sensor_inverse_gain[3];
                 }
             } else {
-                float gain_estimate = event.u.data[8] * 1000.0 / event.u.scalar;
+                float gain_estimate = event.u.data[2] * 1000.0 / event.u.scalar;
                 if (gain_estimate > 1050.0) {
                     agc_gain = conf.sensor_inverse_gain[3];
                 } else if (gain_estimate > 800.0) {
